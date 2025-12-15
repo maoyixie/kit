@@ -11,7 +11,7 @@ GOFLAGS := "-ldflags=-s -w"
 GOHOSTFLAGS := $(GOFLAGS)
 GOTARGETFLAGS := $(GOFLAGS)
 
-LIBSCLOGFLAGS :=  -lrt -lselinux -lsepol
+LIBSCLOGFLAGS :=  -lrt -lselinux -lsepol -lunwind -lunwind-ptrace -lunwind-x86_64
 
 .PHONY: all clean syzkaller executord executor manager
 
@@ -38,7 +38,7 @@ executor: syzkaller
 	cp ./syzkaller/executor/test.h ./executor
 	cp ./syzkaller/executor/test_linux.h ./executor
 	$(CC) -o ./bin/executor ./executor/executor.cc executor/libsclog/libsclog.a \
-		-m64 -O2 -pthread -Wall -Werror -Wparentheses -Wunused-const-variable -Wframe-larger-than=16384 -static-pie \
+		-m64 -O2 -pthread -Wall -Werror -Wparentheses -Wunused-const-variable -Wframe-larger-than=16384 -no-pie \
 		-DGOOS_$(TARGETOS)=1 -DGOARCH_$(TARGETARCH)=1 \
 		-DHOSTGOOS_$(HOSTOS)=1 \
 		$(LIBSCLOGFLAGS)
