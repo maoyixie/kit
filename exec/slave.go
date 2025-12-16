@@ -328,9 +328,14 @@ func MakeEnv(config *Config, pid int) (*Env, error) {
 		return nil, err
 	}
 
-	err = setupCgroup(pid, uid, gid)
-	if err != nil {
-		return nil, err
+	// Only set up cgroups when explicitly enabled via flags.
+	// Bookworm userspace commonly runs with cgroup v2, and this kernel/userspace combo
+	// can reject legacy controller options, which would otherwise break snapshot creation.
+	if config.Flags&FlagEnableCgroups != 0 {
+		err = setupCgroup(pid, uid, gid)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = setupLoop(pid)

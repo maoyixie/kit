@@ -32,15 +32,17 @@ func loopbackMaster(inst *vm.Instance, timeout time.Duration) error {
 			err = inst.Comm(i).SetRWDeadline(time.Time{})
 		}
 	}()
+	// Do a per-channel echo test. Each comm is an independent duplex stream (host<->guest),
+	// so don't assume any cross-channel routing.
 	for i := 0; i < CommNum; i++ {
 		binary.LittleEndian.PutUint32(sendbuf, uint32(i*123+456))
 		_, err = inst.Comm(i).Write(sendbuf)
 		if err != nil {
 			return fmt.Errorf("cannot write to comm %v: %v", i, err)
 		}
-		_, err := io.ReadFull(inst.Comm((i+1)%CommNum), recvbuf)
+		_, err = io.ReadFull(inst.Comm(i), recvbuf)
 		if err != nil {
-			return fmt.Errorf("cannot read from comm %v: %v", (i+1)%CommNum, err)
+			return fmt.Errorf("cannot read from comm %v: %v", i, err)
 		}
 		if !bytes.Equal(sendbuf, recvbuf) {
 			return fmt.Errorf("return bytes %v, expect %v", recvbuf, sendbuf)
@@ -56,9 +58,9 @@ func LoopbackSlave(comms []comm.GuestComm) error {
 		if err != nil {
 			return fmt.Errorf("cannot read from comm %v: %v", i, err)
 		}
-		_, err = comms[(i+1)%CommNum].Write(recvbuf)
+		_, err = comms[i].Write(recvbuf)
 		if err != nil {
-			return fmt.Errorf("cannot write to comm %v: %v", (i+1)%CommNum, err)
+			return fmt.Errorf("cannot write to comm %v: %v", i, err)
 		}
 	}
 	return nil

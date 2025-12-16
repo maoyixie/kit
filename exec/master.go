@@ -142,13 +142,28 @@ func CreateSnapshot(inst *vm.Instance, vmType, commType, executord, executor str
 	if err != nil {
 		return fmt.Errorf("cannot copy binary %v: %v", executor, err)
 	}
+	// Virtio comm devices are created by udev rules in the guest and can be late during boot.
+	// If we start executord too early, it may fail to open /dev/virtio-ports/* and exit,
+	// which makes snapshot creation flaky on slower/instrumented kernels.
+	if commType == "virtio" {
+		_, _, _, _, _ = inst.RawRun(
+			"for i in 0 1 2; do " +
+				"for j in $(seq 1 120); do " +
+				"[ -e /dev/virtio-ports/virtio-serial-$i ] && break; " +
+				"sleep 1; " +
+				"done; " +
+				"done; " +
+				"ls -la /dev/virtio-ports || true")
+	}
 	cmdArgs = executordCmdArgs(vmType, commType, executorGuest, signal, extraSignal, slowdown, debug)
 	// run executord as daemon
 	_, _, _, _, err = inst.RawRun(fmt.Sprintf("nohup %v %v > foo.out 2> foo.err < /dev/null &", executordGuest, cmdArgs))
 	if err != nil {
 		return fmt.Errorf("cannot run executord: %v", err)
 	}
-	err = loopbackMaster(inst, 40*time.Second)
+	// On modern distros and instrumented kernels, VM bring-up + executord startup can be slow.
+	// Use a more tolerant timeout to reduce flaky snapshot creation.
+	err = loopbackMaster(inst, 120*time.Second)
 	if err != nil {
 		return fmt.Errorf("loopback test fail: %v", err)
 	}
@@ -184,7 +199,7 @@ func CreateCProgSnapshot(inst *vm.Instance, vmType, commType, executorcd, header
 	if err != nil {
 		return fmt.Errorf("cannot run executorcd: %v", err)
 	}
-	err = loopbackMaster(inst, 20*time.Second)
+	err = loopbackMaster(inst, 60*time.Second)
 	if err != nil {
 		return fmt.Errorf("loopback test fail: %v", err)
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -44,6 +46,30 @@ func InitVirtioGuest(index int) (*VirtioSerialGuest, error) {
 	}
 	v.guestFile, err = os.OpenFile(v.guestDevPath, os.O_RDWR, 0000)
 	if err != nil {
+		// Fallback: don't rely on udev symlinks. Resolve the right /dev/vportNp1 by
+		// scanning /sys/class/virtio-ports/*/name and matching the requested port name.
+		const sysVirtioPorts = "/sys/class/virtio-ports"
+		ents, derr := os.ReadDir(sysVirtioPorts)
+		if derr == nil {
+			want := virtioSerialName(index)
+			for _, ent := range ents {
+				namePath := filepath.Join(sysVirtioPorts, ent.Name(), "name")
+				b, rerr := os.ReadFile(namePath)
+				if rerr != nil {
+					continue
+				}
+				if strings.TrimSpace(string(b)) != want {
+					continue
+				}
+				dev := filepath.Join("/dev", ent.Name())
+				f, oerr := os.OpenFile(dev, os.O_RDWR, 0000)
+				if oerr == nil {
+					v.guestDevPath = dev
+					v.guestFile = f
+					return v, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("cannot open virtio device %v: %v", v.guestDevPath, err)
 	}
 	return v, nil
@@ -74,8 +100,6 @@ func (v *VirtioSerialHost) VMArg() []string {
 	return []string{
 		"-chardev",
 		fmt.Sprintf("pipe,id=chardev-%v,path=%v", v.Index, v.hostFifoPath),
-		"-device",
-		"virtio-serial",
 		"-device",
 		fmt.Sprintf("virtserialport,chardev=chardev-%v,name=%v", v.Index, virtioSerialName(v.Index)),
 	}

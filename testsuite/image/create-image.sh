@@ -32,6 +32,7 @@ display_help() {
     echo "   -s, --seek                 Image size (MB), default 2048 (2G)"
     echo "   -h, --help                 Display help message"
     echo "   -p, --add-perf             Add perf support with this option enabled. Please set envrionment variable \$KERNEL at first"
+    echo "       DEBOOTSTRAP_NO_CHECK_GPG=1  Disable debootstrap release signature verification (insecure; use only if host keyring is outdated)"
     echo
 }
 
@@ -74,6 +75,30 @@ while true; do
             ;;
     esac
 done
+
+# Debian release mirror selection.
+# NOTE: This must happen AFTER parsing -d/--distribution, otherwise the mirror
+# is selected based on the default RELEASE (stretch).
+MIRROR=https://deb.debian.org/debian
+DEBOOTSTRAP_EXTRA_ARGS=""
+# EOL releases are no longer on deb.debian.org; use archive and relax checks.
+case "$RELEASE" in
+    stretch|jessie|wheezy)
+        MIRROR=http://archive.debian.org/debian
+        DEBOOTSTRAP_EXTRA_ARGS="--no-check-gpg"
+        ;;
+esac
+
+# Allow forcing --no-check-gpg for non-EOL releases (e.g., when host debian-archive-keyring is outdated).
+if [ "${DEBOOTSTRAP_NO_CHECK_GPG:-0}" = "1" ]; then
+    DEBOOTSTRAP_EXTRA_ARGS="--no-check-gpg"
+fi
+
+# If the host doesn't have the Debian archive keyring installed, debootstrap signature checks will fail.
+if [ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+    echo "WARN: /usr/share/keyrings/debian-archive-keyring.gpg not found; falling back to --no-check-gpg for debootstrap."
+    DEBOOTSTRAP_EXTRA_ARGS="--no-check-gpg"
+fi
 
 # Handle cases where qemu and Debian use different arch names
 case "$ARCH" in
@@ -134,7 +159,14 @@ sudo chmod 0755 $DIR
 
 # 1. debootstrap stage
 
-DEBOOTSTRAP_PARAMS="--arch=$DEBARCH --include=$PREINSTALL_PKGS --components=main,contrib,non-free $RELEASE $DIR"
+# Debian 12 (bookworm) split firmware into a separate "non-free-firmware" component.
+COMPONENTS="main,contrib,non-free"
+case "$RELEASE" in
+    bookworm|trixie|forky|sid)
+        COMPONENTS="main,contrib,non-free,non-free-firmware"
+        ;;
+esac
+DEBOOTSTRAP_PARAMS="--arch=$DEBARCH --include=$PREINSTALL_PKGS --components=$COMPONENTS $RELEASE $DIR"
 if [ $FOREIGN = "true" ]; then
     DEBOOTSTRAP_PARAMS="--foreign $DEBOOTSTRAP_PARAMS"
 fi
@@ -144,7 +176,7 @@ fi
 if [ $DEBARCH == "riscv64" ]; then
     DEBOOTSTRAP_PARAMS="--keyring /usr/share/keyrings/debian-ports-archive-keyring.gpg --exclude firmware-atheros $DEBOOTSTRAP_PARAMS http://deb.debian.org/debian-ports"
 fi
-sudo debootstrap $DEBOOTSTRAP_PARAMS
+sudo debootstrap $DEBOOTSTRAP_EXTRA_ARGS $DEBOOTSTRAP_PARAMS $MIRROR
 
 # 2. debootstrap stage: only necessary if target != host architecture
 
@@ -165,6 +197,13 @@ echo 'binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc defaults 0 0' | sudo tee 
 echo -en "127.0.0.1\tlocalhost\n" | sudo tee $DIR/etc/hosts
 echo "nameserver 8.8.8.8" | sudo tee -a $DIR/etc/resolve.conf
 echo "syzkaller" | sudo tee $DIR/etc/hostname
+
+# Archive releases often have expired metadata; disable Valid-Until checks in the guest.
+case "$RELEASE" in
+    stretch|jessie|wheezy)
+        echo 'Acquire::Check-Valid-Until "false";' | sudo tee $DIR/etc/apt/apt.conf.d/99no-check-valid-until
+        ;;
+esac
 ssh-keygen -f $RELEASE.id_rsa -t rsa -N ''
 sudo mkdir -p $DIR/root/.ssh/
 cat $RELEASE.id_rsa.pub | sudo tee $DIR/root/.ssh/authorized_keys
@@ -191,4 +230,4 @@ sudo mkdir -p ./mnt
 sudo mount -o loop $RELEASE.img ./mnt
 sudo cp -a $DIR/. ./mnt/.
 sudo umount ./mnt
-qemu-img convert -f raw -O qcow2 stretch.img stretch.qcow2
+qemu-img convert -f raw -O qcow2 $RELEASE.img $RELEASE.qcow2

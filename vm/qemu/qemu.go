@@ -579,6 +579,8 @@ func (inst *instance) boot() error {
 	}
 	// setup virtio arguments
 	if inst.commType == "virtio" {
+		// Use a single virtio-serial controller and attach multiple virtserialport devices to it.
+		args = append(args, "-device", "virtio-serial")
 		for _, c := range inst.virtioSerial {
 			args = append(args, c.VMArg()...)
 		}

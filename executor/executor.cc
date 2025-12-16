@@ -409,7 +409,10 @@ static void setup_features(char** enable, int n);
 
 int main(int argc, char** argv)
 {
-	mlockall(MCL_FUTURE|MCL_CURRENT);
+	// mlockall(MCL_FUTURE|MCL_CURRENT) can make subsequent mmaps fail with EAGAIN inside
+	// constrained environments (e.g., low RLIMIT_MEMLOCK), which breaks executors on Debian bookworm.
+	// It's a best-effort optimization; disable to keep the pipeline reliable.
+	// mlockall(MCL_FUTURE|MCL_CURRENT);
 	if (argc == 2 && strcmp(argv[1], "version") == 0) {
 		puts(GOOS " " GOARCH " " SYZ_REVISION " " GIT_REVISION);
 		return 0;

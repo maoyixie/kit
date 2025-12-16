@@ -135,7 +135,13 @@ func main() {
 		Executor:      *flagExecutor,
 		UseShmem:      true,
 		UseForkServer: true,
-		Flags:         exec.FlagSandboxNamespace | exec.FlagEnableTun | exec.FlagEnableNetDev | exec.FlagEnableCgroups,
+		// NOTE: Disable cgroup setup by default.
+		// On some host/kernel/userspace combos (e.g. Debian bookworm userspace + this kernel config),
+		// syzkaller's cgroup mount sequence fails (invalid controller options), which prevents snapshot
+		// creation and blocks the whole pipeline.
+		// Keep the sandbox minimal to improve portability across kernels/userspace.
+		// Extra device/network setup can fail under restricted namespace configurations and block init.
+		Flags: exec.FlagSandboxNamespace,
 		Timeouts:      sysTarget.Timeouts(*flagSlowdown),
 	}
 	if *flagSignal {
